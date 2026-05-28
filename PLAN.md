@@ -14,9 +14,5 @@
 
 ## Phase 3: Launcher + CLI
 
-- [ ] `launcher.rs` — launch (worktree → hooks → tmux → claude) and clean (state → tmux kill → worktree remove)
-- [ ] `main.rs` — clap subcommands: launch / clean / attach
-
-## Phase 4: Monitor
-
-- [ ] `monitor.rs` — pane process state polling loop
+- [ ] `launcher.rs` — launch / add / clean logic (worktree → hooks → tmux → claude)
+- [ ] `main.rs` — clap subcommands: launch / add / clean / list
