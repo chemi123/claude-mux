@@ -40,13 +40,14 @@ pub fn run<E: Executor>(
     tmux.create_session(&session_name, &window_name, &wt_path_str)?;
     tmux.send_keys(&session_name, &window_name, 0, "claude")?;
 
-    let state = state::load()?;
-    let state = state::add_window(&state, &session_name, WindowEntry {
-        repo: repo.clone(),
-        branch: branch.clone(),
-        worktree: wt_path,
+    state::with_state(|st| {
+        let new_st = state::add_window(st, &session_name, WindowEntry {
+            repo: repo.clone(),
+            branch: branch.clone(),
+            worktree: wt_path,
+        })?;
+        Ok((new_st, ()))
     })?;
-    state::save(&state)?;
 
     println!("Session: {session_name}, Window: {window_name}");
     Ok(())

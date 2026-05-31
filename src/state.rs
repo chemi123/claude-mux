@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 
@@ -13,14 +14,14 @@ pub struct WindowEntry {
     pub worktree: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionEntry {
-    pub windows: Vec<WindowEntry>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct State {
     pub sessions: BTreeMap<String, SessionEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEntry {
+    pub windows: Vec<WindowEntry>,
 }
 
 fn state_path() -> Result<PathBuf> {
@@ -28,7 +29,33 @@ fn state_path() -> Result<PathBuf> {
     Ok(home.join(".claude-mux").join("var").join("state.json"))
 }
 
-pub fn load() -> Result<State> {
+fn lock_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().context("failed to resolve home directory")?;
+    Ok(home.join(".claude-mux").join("var").join("state.lock"))
+}
+
+fn acquire_lock(exclusive: bool) -> Result<fs::File> {
+    let path = lock_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&path)
+        .with_context(|| format!("failed to open lock file: {}", path.display()))?;
+    if exclusive {
+        file.lock_exclusive()
+            .context("failed to acquire exclusive lock on state")?;
+    } else {
+        file.lock_shared()
+            .context("failed to acquire shared lock on state")?;
+    }
+    Ok(file)
+}
+
+fn load_inner() -> Result<State> {
     let path = state_path()?;
     if !path.exists() {
         return Ok(State::default());
@@ -40,7 +67,7 @@ pub fn load() -> Result<State> {
     Ok(state)
 }
 
-pub fn save(state: &State) -> Result<()> {
+fn save_inner(state: &State) -> Result<()> {
     let path = state_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -50,6 +77,22 @@ pub fn save(state: &State) -> Result<()> {
     fs::write(&path, content)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
+}
+
+pub fn load() -> Result<State> {
+    let _lock = acquire_lock(false)?;
+    load_inner()
+}
+
+pub fn with_state<F, R>(f: F) -> Result<R>
+where
+    F: FnOnce(&State) -> Result<(State, R)>,
+{
+    let _lock = acquire_lock(true)?;
+    let state = load_inner()?;
+    let (new_state, result) = f(&state)?;
+    save_inner(&new_state)?;
+    Ok(result)
 }
 
 pub fn add_window(state: &State, session: &str, window: WindowEntry) -> Result<State> {

@@ -64,17 +64,28 @@ impl<E: Executor> Tmux<E> {
         Ok(())
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<String>> {
-        match self.executor.execute("tmux", &["list-sessions", "-F", "#{session_name}"], None) {
-            Ok(output) => {
-                let sessions = output.stdout
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect();
-                Ok(sessions)
-            }
-            Err(_) => Ok(vec![]),
-        }
+    pub fn send_bell(&self, session: &str, window: &str) -> Result<()> {
+        let target = format!("{session}:{window}");
+        self.executor.execute("tmux", &["send-keys", "-t", &target, "\x07"], None)?;
+        Ok(())
+    }
+
+    pub fn rename_window(&self, session: &str, window: &str, new_name: &str) -> Result<()> {
+        let target = format!("{session}:{window}");
+        self.executor.execute("tmux", &["rename-window", "-t", &target, new_name], None)?;
+        Ok(())
+    }
+
+    pub fn notify_complete(&self, session: &str, window: &str) -> Result<()> {
+        self.rename_window(session, window, &format!("[done] {window}"))?;
+        self.send_bell(session, &format!("[done] {window}"))?;
+        Ok(())
+    }
+
+    pub fn notify_question(&self, session: &str, window: &str) -> Result<()> {
+        self.rename_window(session, window, &format!("[wait] {window}"))?;
+        self.send_bell(session, &format!("[wait] {window}"))?;
+        Ok(())
     }
 
     fn split_window(&self, session: &str, window_name: &str, working_dir: &str) -> Result<()> {
@@ -138,16 +149,32 @@ mod tests {
     }
 
     #[test]
-    fn test_list_sessions() {
-        let tmux = Tmux::new(MockExecutor::new(vec![MockExecutor::ok("s1\ns2\ns3")]));
-        let sessions = tmux.list_sessions().unwrap();
-        assert_eq!(sessions, vec!["s1", "s2", "s3"]);
+    fn test_send_bell() {
+        let tmux = Tmux::new(MockExecutor::new(vec![MockExecutor::ok("")]));
+        tmux.send_bell("s", "w").unwrap();
     }
 
     #[test]
-    fn test_list_sessions_empty() {
-        let tmux = Tmux::new(MockExecutor::new(vec![MockExecutor::err("no server running")]));
-        let sessions = tmux.list_sessions().unwrap();
-        assert!(sessions.is_empty());
+    fn test_rename_window() {
+        let tmux = Tmux::new(MockExecutor::new(vec![MockExecutor::ok("")]));
+        tmux.rename_window("s", "w", "[done] w").unwrap();
+    }
+
+    #[test]
+    fn test_notify_complete() {
+        let tmux = Tmux::new(MockExecutor::new(vec![
+            MockExecutor::ok(""),
+            MockExecutor::ok(""),
+        ]));
+        tmux.notify_complete("s", "main").unwrap();
+    }
+
+    #[test]
+    fn test_notify_question() {
+        let tmux = Tmux::new(MockExecutor::new(vec![
+            MockExecutor::ok(""),
+            MockExecutor::ok(""),
+        ]));
+        tmux.notify_question("s", "main").unwrap();
     }
 }

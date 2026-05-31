@@ -89,11 +89,11 @@ pub fn run() -> Result<()> {
             } else if let Some(session) = session {
                 clean::run(&executor, &session, force)
             } else {
-                list::run()?;
+                list::run(&executor)?;
                 anyhow::bail!("specify a session name or use --all");
             }
         }
-        Commands::List => list::run(),
+        Commands::List => list::run(&executor),
         Commands::Notify { session, window, event } => {
             notify::run(&executor, &session, &window, &event)
         }

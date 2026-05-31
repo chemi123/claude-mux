@@ -15,12 +15,12 @@ pub fn run<E: Executor>(executor: &E, session: &str, force: bool) -> Result<()> 
     let wt = Worktree::new(executor);
 
     for window in &entry.windows {
+        hooks::unregister(&window.worktree)?;
         if force {
             wt.force_remove(&window.repo, &window.branch)?;
         } else {
             wt.remove(&window.repo, &window.branch)?;
         }
-        hooks::unregister(&window.worktree)?;
     }
 
     let tmux = Tmux::new(executor);
@@ -28,8 +28,10 @@ pub fn run<E: Executor>(executor: &E, session: &str, force: bool) -> Result<()> 
         tmux.kill_session(session)?;
     }
 
-    let st = state::remove_session(&st, session)?;
-    state::save(&st)?;
+    state::with_state(|st| {
+        let new_st = state::remove_session(st, session)?;
+        Ok((new_st, ()))
+    })?;
 
     println!("Cleaned session: {session}");
     Ok(())

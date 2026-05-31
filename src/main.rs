@@ -1,7 +1,6 @@
 mod cmd;
 mod executor;
 mod hooks;
-mod notify;
 mod state;
 mod tmux;
 mod worktree;

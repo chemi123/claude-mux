@@ -60,7 +60,8 @@ pub fn register(worktree_dir: &Path, session: &str, window: &str) -> Result<()> 
 }
 
 pub fn unregister(worktree_dir: &Path) -> Result<()> {
-    let settings_path = worktree_dir.join(".claude").join("settings.json");
+    let claude_dir = worktree_dir.join(".claude");
+    let settings_path = claude_dir.join("settings.json");
 
     if !settings_path.exists() {
         return Ok(());
@@ -78,8 +79,36 @@ pub fn unregister(worktree_dir: &Path) -> Result<()> {
         }
     }
 
-    save_settings(&settings_path, &settings)?;
+    if is_settings_empty(&settings) {
+        fs::remove_file(&settings_path)
+            .with_context(|| format!("failed to remove {}", settings_path.display()))?;
+        if claude_dir.read_dir()?.next().is_none() {
+            fs::remove_dir(&claude_dir)
+                .with_context(|| format!("failed to remove {}", claude_dir.display()))?;
+        }
+    } else {
+        save_settings(&settings_path, &settings)?;
+    }
+
     Ok(())
+}
+
+fn is_settings_empty(settings: &Value) -> bool {
+    let obj = match settings.as_object() {
+        Some(obj) => obj,
+        None => return false,
+    };
+    if obj.is_empty() {
+        return true;
+    }
+    if obj.len() != 1 {
+        return false;
+    }
+    let hooks = match obj.get("hooks").and_then(|h| h.as_object()) {
+        Some(hooks) => hooks,
+        None => return false,
+    };
+    hooks.values().all(|v| v.as_array().map_or(false, |a| a.is_empty()))
 }
 
 fn load_settings(path: &Path) -> Result<Value> {
@@ -148,20 +177,15 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_cleans_managed_hooks() {
+    fn test_remove_deletes_empty_settings() {
         let dir = tempfile::tempdir().unwrap();
         register(dir.path(), "s", "w").unwrap();
+        assert!(dir.path().join(".claude/settings.json").exists());
+
         unregister(dir.path()).unwrap();
 
-        let settings: Value = serde_json::from_str(
-            &fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap(),
-        ).unwrap();
-
-        let pre = settings["hooks"]["PreToolUse"].as_array().unwrap();
-        assert!(pre.is_empty());
-
-        let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert!(stop.is_empty());
+        assert!(!dir.path().join(".claude/settings.json").exists());
+        assert!(!dir.path().join(".claude").exists());
     }
 
     #[test]
@@ -192,5 +216,27 @@ mod tests {
     fn test_remove_missing_file_is_ok() {
         let dir = tempfile::tempdir().unwrap();
         unregister(dir.path()).unwrap();
+    }
+
+    #[test]
+    fn test_remove_keeps_claude_dir_if_not_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        register(dir.path(), "s", "w").unwrap();
+        fs::write(dir.path().join(".claude/CLAUDE.md"), "notes").unwrap();
+
+        unregister(dir.path()).unwrap();
+
+        assert!(!dir.path().join(".claude/settings.json").exists());
+        assert!(dir.path().join(".claude").exists());
+        assert!(dir.path().join(".claude/CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn test_is_settings_empty() {
+        assert!(is_settings_empty(&json!({})));
+        assert!(is_settings_empty(&json!({"hooks": {"PreToolUse": [], "Stop": []}})));
+        assert!(!is_settings_empty(&json!({"hooks": {"PreToolUse": [{"matcher": "Write"}]}})));
+        assert!(!is_settings_empty(&json!({"other_key": "value"})));
+        assert!(!is_settings_empty(&json!({"hooks": {}, "other": "value"})));
     }
 }
